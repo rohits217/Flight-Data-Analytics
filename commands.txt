@@ -1,0 +1,138 @@
+############################################################
+CS644: Introduction to Big Data
+Final Project - Flight Data Analysis
+
+Submitted by
+Ahamed Arafaath Muthalif Mubarak Ali
+Rohit Subramanian Arivalagan
+Vishnusankar Venkataraman
+Prithvi Venkatachalapathy
+
+(Note: Lines to add in native scripts are not included in this txt file as length is getting longer)
+############################################################
+1. Launch all the master and slave Amazon EC2 Instances. 
+ssh -i bigdata_key.pem ubuntu@ec2-54-165-154-66.compute-1.amazonaws.com
+Following the same for slave EC2 Instances.
+ssh -i bigdata_key.pem ubuntu@<public_DNS>
+sudo addgroup hadoop
+sudo adduser --ingroup hadoop oozie
+sudo adduser oozie sudo
+su oozie
+cd
+############################################################
+2. Install java, maven and other essential libraries.
+sudo apt-get update
+sudo apt-get install java-1.7.0-openjdk
+java -version
+sudo apt-get -y install maven
+mvn -v
+sudo apt-get -y install build-essential autoconf automake libtool cmake zliblg-dev pkg-config libssl-dev
+sudo apt-get -y install libprotobuf-dev protobuf-compiler
+protoc --version
+sudo apt-get -y install zip unzip
+############################################################
+3. Compile, Install and configure Hadoop HDFS, YARN. (Same steps followed in all slave nodes)
+wget https://archive.apache.org/dist/hadoop/core/hadoop-2.6.5/hadoop-2.6.5.tar.g
+tar xvzf hadoop-2.6.5.tar.gz
+mv hadoop-2.6.5 hadoop
+cd hadoop
+mvn clean package -Pdist,native -Dmaven.javadoc.skip=true -DskipTests -Dtar
+cd
+cp ~/hadoop-2.7.1-src/hadoop-dist/target/hadoop-2.7.1.tar.gz ~/
+tar -zxvf hadoop-2.7.1.tar.gz
+cd ~/hadoop-2.7.1
+vi ~/.bashrc #include lines in native script
+source ~/.bashrc
+vi etc/hadoop/hadoop-env.sh #include lines in native script
+vi etc/hadoop/mapred-env.sh #include lines in native script
+vi etc/hadoop/yarn-env.sh #include lines in native script
+vi etc/hadoop/core-site.xml #include lines in native script
+vi etc/hadoop/hdfs-site.xml #include lines in native script
+cp etc/hadoop/mapred-site.xml.template etc/hadoop/mapred-site.xml
+vi etc/hadoop/mapred-site.xml #include lines in native script
+vi etc/hadoop/yarn-site.xml #include lines in native script
+############################################################
+4. Configure a cluster
+sudo vi /etc/hosts
+54-165-154-66 hadoop-master
+172.31.4.187 hadoop-slave1
+172.31.22.25 hadoop-slave2
+.
+.
+. (For all the seven VMs)
+cp etc/hadoop/slaves etc/hadoop/slaves.bak
+vi etc/hadoop/slaves
+hadoop-master
+hadoop-slave1
+hadoop-slave2
+.
+.
+.
+vi etc/hadoop/master
+hadoop-master
+############################################################
+5. Install Oozie
+cd
+wget http://apache.claz.org/oozie/4.2.0/oozie-4.2.0.tar.gz
+tar -zxvf oozie-4.2.0.tar.gz
+cd ~/oozie-4.2.0
+vi pom.xml #include lines in native script
+bin/mkdistro.sh -DskipTests -DtargetJavaVersion=1.7 -Puber -Phadoop-2 -Dhadoop.version=2.7.1 -Dhadoop.auth.version=2.7.1 -Ddistcp.version=2.7.1
+cd
+cp -r ~/oozie-4.2.0/distro/target/oozie-4.2.0-distro/oozie-4.2.0 oozie-4.2.0-bin
+vi ~/.bashrc #include lines in native script
+source ~/.bashrc
+cd ~/oozie-4.2.0-bin
+mkdir libext
+cd ~/oozie-4.2.0-bin/libext
+wget http://dev.sencha.com/deploy/ext-2.2.zip
+find ~/hadoop-2.7.1/share/hadoop -name *.jar -type f -print0 | xargs -0 cp -t ~/oozie-4.2.0-bin/libext
+rm -f *-tests*.jar *-sources.jar hsqldb-2.0.0.jar
+cd ~/oozie-4.2.0-bin
+tar -zxvf oozie-sharelib-4.2.0.tar.gz
+cp conf/oozie-default.xml.reference conf/oozie-default.xml
+vi conf/oozie-site.xml #include lines in native script
+vi conf/hadoop-conf/core-site.xml
+bin/oozie-setup.sh prepare-war
+cd ~/hadoop-2.7.1
+bin/hdfs namenode -format
+sbin/start-dfs.sh
+sbin/start-yarn.sh
+sbin/mr-jobhistory-daemon.sh --config $HADOOP_CONF_DIR start historyserver
+bin/hdfs dfs -mkdir /user
+bin/hdfs dfs -mkdir /user/oozie
+bin/hdfs dfsadmin -safemode leave
+cd ~/oozie-4.2.0-bin
+bin/oozie-setup.sh sharelib create -fs hdfs://hadoop-master:8020
+bin/oozied.sh start
+bin/oozie admin -status
+jps
+############################################################
+6. Copy data from localhost to EC2 namenode and unzip the data
+scp -i bigdata_key.pem ~/dataverse_files.zip ubuntu@ec2-54-165-154-66.compute-1.amazonaws.com:/home/oozie
+unzip dataverse_files.zip
+############################################################
+7. Upload files to hdfs and make jar file
+hdfs dfs -mkdir /user/oozie/input
+hdfs dfs -put /home/oozie/data /user/oozie/input
+hdfs dfs -ls /user/oozie/input
+hdfs dfs -put home/oozie/flight/ /user/oozie
+hadoop com.sun.tools.javac.Main *.java
+jar cf FlightDataAnalysis.jar *.class
+hdfs dfs -put FlightDataAnalysis.jar /user/oozie
+############################################################
+8. Run map-reduce jobs on oozie 
+bin/oozie job -oozie http://localhost:11000/oozie -config /user/ubuntu/flight/job.properties -run
+############################################################
+9. Check job status 
+bin/oozie job -oozie http://localhost:11000/oozie -info 0000000-201123063732543-oozie-ubun-W
+UI: go to this UI to see the running status - http://18.222.132.19:11000/oozie/
+############################################################
+10. Get results and stop oozie and hadoop
+hdfs dfs -get /user/oozie/output output
+bin/oozied.sh stop
+cd ~/hadoop
+sbin/mr-jobhistory-daemon.sh --config $HADOOP_CONF_DIR stop historyserver
+sbin/stop-yarn.sh
+sbin/stop-dfs.sh
+############################################################
